@@ -1,0 +1,400 @@
+#!/usr/bin/env bash
+
+# *------------------------------------------------------------------------------------------
+# | PROGRAM NAME: Concatenate, process, do MSA and trimm MSA (optional)
+# | DATE: 16/02/22 
+# | CREATED BY: Lilrod
+# | PROJECT FILE: /new_vol/tesis
+# *------------------------------------------------------------------------------------------
+# | PURPOSE: Concatenate, process multi fasta, do MSA and trimm alignment (optional)
+# *------------------------------------------------------------------------------------------
+# | USAGE: da_phylo_work_with --iqtree --raxml -od dir_name -p prefix \
+# |        --trimm --msa  \
+# |        --outgroup taxon_name1,taxon_name2,tn3,tnN *.fasta
+# | * When the user chose IQTREE, user can't give more than 1 outgroup
+# | * When the user chose raxML-NG, user can give more than 1 outgroup
+# *------------------------------------------------------------------------------------------
+# | WARNING: Output directory must be inside the directory in which we are running the script
+# *------------------------------------------------------------------------------------------
+
+start_dir=$PWD
+
+trimm_flag=false
+msa_flag=false
+
+# what program does the user wants to use?
+iqtree_flag=false
+raxml_flag=false
+
+echo "Started at `date +%T`"
+echo
+
+# to iterate over the arguments until there is no arg remaining:
+while [[ -n "$1" ]]; do
+    case "$1" in
+        --outdir | -od)
+            PWD=$(pwd)
+            out_dir="$PWD/$2"
+            # Does the out_dir specified exist?
+            # test to see if the directory exists
+            if [ ! -d "${out_dir}" ];
+            then 
+                # if dir doesn't exist, create directory:
+                echo "The directory ${out_dir} doesn't exist. Creating it ..."
+                echo
+                mkdir $(basename ${out_dir})
+                #mkdir ${out_dir} # also works!
+                shift
+            else
+                echo "The directory ${out_dir} exist."
+                echo
+                # if dir exist, just execute shift
+                shift
+            fi
+            # if outdir is not given
+            #exit
+            ;;
+        --trimm)
+            # if the user wants to trimm the MSA
+            trimm_flag=true
+            ;;
+        --msa)
+            # if the user only wants to do MSA and not phylogenetic analysis
+            msa_flag=true
+            ;;
+        --iqtree)
+            # if the user only wants to use iqtree for phylogenetic analysis
+            iqtree_flag=true
+            ;;
+        --raxml)
+            # if the user only wants to use iqtree for phylogenetic analysis
+            raxml_flag=true
+            ;;
+        -p) # add a prefix to the new multifasta file
+            #shift
+            #prefix="$1"
+            prefix="$2"
+            shift # $2 value is now $1
+            ;;
+        *.fasta | *.fa)
+            # 1. Concatenate all fasta files passed to the script
+            cat "$1" >> ${prefix}_multi.fasta
+            ## the >> tells the shell to append that newline to the file, 
+            ## creating if it doesn't already exist.
+            ;;
+        --outgroup | -o)
+            # Store the outgroup taxon name especified in a variable
+            outgroups="$2"
+            shift
+            ;;
+        --help | -h)
+            echo """
+USAGE: 
+do_phylo_work_with --iqtree --raxml -od dir_name -p prefix --trimm --msa --outgroup taxon_name1,taxon_name2,tn3,tnN *.fasta
+
+* When the user chose IQTREE, user can't give more than 1 outgroup
+* When the user chose raxML-NG, user can give more than 1 outgroup
+            """
+            exit
+            ;;
+        *) 
+            echo "$1 is not a valid argument"
+            ;;
+    esac
+
+shift 
+# with -p option: $1 with value is dropped
+# with .fasta or .fa files, shift will drop the current $1 in each iteration
+
+done
+
+#shift # $1 with value is dropped
+
+echo """
+# *----------------------------------------------------------------------------
+# | PART 1: Processing multifasta and Multiple Sequence Alignment
+# *----------------------------------------------------------------------------
+"""
+
+#echo "PART 1: Processing multifasta and Multiple Sequence Alignment"
+#echo
+
+# 1.5. Post processing of multi fasta file
+
+# 1.5.1. Removing blank lines
+#seqkit seq ${prefix}_multi.fasta -o ${prefix}_just.multi.fasta \
+#    --line-width 100
+# 1.5.2. Justify all the lines 
+#sed '/^$/d' ${prefix}_just.multi.fasta > ${prefix}_just.no.blanks.multi.fasta
+
+# 1.5.3. All in one line:
+## Removing blank lines and justify all lines to 100 of width
+seqkit seq ${prefix}_multi.fasta \
+    --line-width 100 | sed '/^$/d' > ${prefix}.j.nb.fasta
+
+# 2. MSA
+mafft --auto ${prefix}.j.nb.fasta > ${prefix}.msa.fasta # 60 char per line
+
+# 3. Trimming MSA (if user gave the option)
+## trimm_flag=true
+if $trimm_flag; then
+    trimal -in ${prefix}.msa.fasta -out ${prefix}.trimmed.msa.fasta \
+        -fasta -automated1 # will decide between gappyout and strictplus method
+    echo "The MSA was trimmed. The trimmed MSA is ${prefix}.trimmed.msa.fasta"
+fi
+
+# Move all output files to the output directory specified
+mv ${prefix}* ${out_dir}
+
+# if the user only wants to do MSA and not any phylogenetic analysis
+if $msa_flag; then
+    echo "The user only wants to do MSA."
+    exit 
+fi
+
+# Creating the necessary directories inside $out_dir
+#mkdir ${out_dir}/{modeltest,raxml-ng,iqtree}
+
+################################ Copying files ################################
+# if $trimm_flag is true, there would be 2 *.msa.fasta files, 
+## must especify trimmed
+# if $trimm_flag is false, there would be only 1 *.msa.fasta file
+#if ${trimm_flag}; then
+#    find ${out_dir}/*/ -maxdepth 0 \
+#        -exec cp ${out_dir}/${prefix}.trimmed.msa.fasta {} \;
+#    #cp ${out_dir}/${prefix}.trimmed.msa.fasta ${out_dir}/modeltest
+#    #cp ${out_dir}/${prefix}.trimmed.msa.fasta ${out_dir}/raxml-ng
+#    #cp ${out_dir}/${prefix}.trimmed.msa.fasta ${out_dir}/iqtree
+#else
+#    find ${out_dir}/*/ -maxdepth 0 \
+#        -exec cp ${out_dir}/*.msa.fasta {} \;
+#    #cp ${out_dir}/${prefix}.msa.fasta ${out_dir}/modeltest
+#    #cp ${out_dir}/${prefix}.msa.fasta ${out_dir}/raxml-ng
+#    #cp ${out_dir}/${prefix}.msa.fasta ${out_dir}/iqtree
+#fi
+
+################################ another option ###############################
+#if ${trimm_flag}; then
+#
+#    for dir in ${out_dir}/*/;
+#    do
+#        echo $dir
+#        cd $dir
+#        ln -s ../*.trimmed.msa.fasta .
+#        cd ../../
+#    done
+#
+#else
+#
+#    for dir in ${out_dir}/*/;
+#    do
+#        echo $dir
+#        cd $dir
+#        ln -s ../*.msa.fasta .
+#        cd ../../
+#    done
+#fi
+
+#############################################################################
+mkdir ${out_dir}/modeltest
+#############################################################################
+# Putting each especific file in its place
+## for Modeltest
+if [[ $trimm_flag == true ]]; then #[[ $trimm_flag -eq 0 ]]
+    cd ${out_dir}/modeltest
+    ln -s ../*.trimmed.msa.fasta .
+    cd ${start_dir}
+    #cd ../../
+    # out of raxml-ng, out of out_dir
+else
+    cd ${out_dir}/modeltest
+    ln -s ../*.msa.fasta .
+    cd ${start_dir}
+    #cd ../../
+    # out of raxml-ng, out of out_dir
+fi
+
+
+# create an iqtree or raxml (up to the user) directory 
+# and place the right MSA file in that directory
+if [[ $iqtree_flag == true && $trimm_flag == true ]]; then
+    mkdir ${out_dir}/iqtree
+    cd ${out_dir}/iqtree
+    ln -s ../*.trimmed.msa.fasta .
+    cd ${start_dir}
+    #cd ../../
+    # out of raxml-ng, out of out_dir
+elif [[ $iqtree_flag == true && $trimm_flag == false ]]; then
+    mkdir ${out_dir}/iqtree
+    cd ${out_dir}/iqtree
+    ln -s ../*.msa.fasta .
+    cd ${start_dir}
+    #cd ../../
+    # out of raxml-ng, out of out_dir
+elif [[ $raxml_flag == true && $trimm_flag == true ]]; then
+    mkdir ${out_dir}/raxml-ng
+    cd ${out_dir}/raxml-ng
+    ln -s ../*.trimmed.msa.fasta .
+    cd ${start_dir}
+    #cd ../../
+    # out of raxml-ng, out of out_dir
+elif [[ $raxml_flag == true && $trimm_flag == false ]]; then
+    mkdir ${out_dir}/raxml-ng
+    cd ${out_dir}/raxml-ng
+    ln -s ../*.msa.fasta .
+    cd ${start_dir}
+    #cd ../../
+    # out of raxml-ng, out of out_dir
+else
+    echo "Choose a IQTREE or raxML-NG for your phylogenetic analysis!"
+    exit
+fi
+
+#############################################################################
+
+echo """
+# *----------------------------------------------------------------------------
+# | PART 2: Analysis of best evolutionary model with ModelTest-NG
+# *----------------------------------------------------------------------------
+"""
+
+#echo "PART 2: Analysis of best evolutionary model with ModelTest-NG"
+#echo
+
+#cd ${out_dir}
+
+# if $trimm_flag is true, there would be 2 *.msa.fasta files, must especify trimmed
+# if $trimm_flag is false, there would be only 1 *.msa.fasta file
+#if ${trimm_flag}; then
+#    modeltest-ng-static -d nt --input ${out_dir}/*.trimmed.msa.fasta \
+#        -t ml -p 2 --verbose --output ${out_dir}/modeltest/${prefix}.model
+#else
+#    modeltest-ng-static -d nt --input ${out_dir}/*.msa.fasta \
+#        -t ml -p 2 --verbose --output ${out_dir}/modeltest/${prefix}.model
+#fi
+
+#modeltest-ng-static -d nt --input ${out_dir}/*.msa.fasta \
+#    -t ml -p 2 --verbose --output ${out_dir}/modeltest/${prefix}.model
+
+# the correct MSA file is already in the modeltest directory
+modeltest-ng-static -d nt --input ${out_dir}/modeltest/*.msa.fasta \
+    -t ml -p 2 --verbose --output ${out_dir}/modeltest/${prefix}.model
+# best model in ${prefix}.model.out
+
+## Extracting modeltest results: Best model according to AICc
+grep "Model:" ${out_dir}/modeltest/${prefix}.model.out
+
+# Storing the line with the resulting best model in a variable
+model_line=$(grep "Model:" ${out_dir}/modeltest/${prefix}.model.out | tail -n +3)
+# -n +NUM to output starting with line NUM
+
+# Putting the elements of that variable in an array
+model_array=(${model_line})
+
+# Extracting second element (index 1)  of array: the especific model
+model=${model_array[1]}
+
+# Printing information
+echo
+echo "Modeltest, Best model according to AICc: $model"
+echo
+# works until here :)
+
+echo """
+# *----------------------------------------------------------------------------
+# | PART 3: Estimation of species tree with IQ-TREE and RaxML-NG
+# *----------------------------------------------------------------------------
+"""
+
+if ${iqtree_flag}; then
+
+    echo "PART 3A: IQ-TREE analysis: Estimation of species tree"
+    echo
+
+    # IQ-TREE doesm't let you especify the output directory of the resulting files
+    #cp ${out_dir}/*.msa.fasta ${out_dir}/iqtree
+    cd ${out_dir}/iqtree
+
+    echo *.msa.fasta
+    echo
+
+    ############################################################################
+    # if $trimm_flag is true, there would be 2 *.msa.fasta files
+    # if $trimm_flag is false, there would be only 1 *.msa.fasta file
+    #if ${trimm_flag}; then
+    #    ln -s ../*.trimmed.msa.fasta .
+    #else
+    #    ln -s ../*.msa.fasta .
+    #fi
+    ############################################################################
+
+    ## ModelTest + IQ-TREE run on supermatrix to estimate the species tree
+    echo "ModelTest + IQ-TREE run on MSA to estimate the species tree"
+    echo
+    iqtree -s *.msa.fasta -st DNA -m ${model} -b 1000 \
+        -pre modeltest_${prefix} -nt 2 #-o "${outgroups}"
+
+    ## ModelFinder + IQ-TREE run on supermatrix to estimate the species tree
+    echo "ModelFinder + IQ-TREE run on MSA to estimate the species tree"
+    echo
+    # -b <#replicates>     Bootstrap + ML tree + consensus tree (>=100)
+    # -m TEST?
+    iqtree -s *.msa.fasta -st DNA -m MFP -AICc -b 1000 \
+        -pre modelfinder_${prefix} -nt 2 \
+        -o "${outgroups}" # Outgroup taxon name (only one!)
+    # -AICc
+
+    #rm *.msa.fasta
+
+    cd ${start_dir} # same as cd ../../
+
+    echo
+    echo "I'm back at the $(basename ${PWD}) directory"
+    echo "I'm back at the $(basename ${start_dir}) directory"
+    echo
+
+elif ${raxml_flag}; then 
+    # is raxml_flag is true, the user want to only use raxml-ng
+    echo "PART 3B: RaxML-ng analysis: Estimation of species tree"
+    echo
+
+    #cp ${out_dir}/*.msa.fasta ${out_dir}/raxml-ng
+    cd ${out_dir}/raxml-ng
+
+    echo
+    echo *.msa.fasta
+    echo
+
+    ############################################################################
+    # if $trimm_flag is true, there would be 2 *.msa.fasta files
+    # if $trimm_flag is false, there would be only 1 *.msa.fasta file
+    #if ${trimm_flag}; then
+    #    ln -s ../*.trimmed.msa.fasta .
+    #else
+    #    ln -s ../*.msa.fasta .
+    #fi
+    ############################################################################
+
+    raxml-ng --all --msa *.msa.fasta \
+        --model ${model} --tree pars{25},rand{25} --bs-trees 1000 \
+        --prefix ${prefix} \
+        --threads 2 \
+        --outgroup "${outgroups}"
+        # comma-separated list of Outgroup taxon names:o1,o2,...,oN
+        # user can give more than 1 outgroup
+
+    #touch ${prefix}.raxml-ng.output.txt
+    #echo "I'm a toy file" > ${prefix}.raxml-ng.output.txt
+
+    #rm *.msa.fasta
+
+    cd ${start_dir}
+
+    echo "I'm back at the $(basename ${PWD}) directory"
+    echo "I'm back at the $(basename ${start_dir}) directory"
+    echo
+
+else
+    echo "Choose a program to do the phylogenetic analysis!"
+
+fi
